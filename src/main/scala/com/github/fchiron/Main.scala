@@ -7,13 +7,13 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.{ AuthorizationFailedRejection, Directive1 }
 import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.unmarshalling.Unmarshaller
 import akka.stream.ActorMaterializer
 import com.github.fchiron.SessionStore.SessionData
 import de.heikoseeberger.akkahttpcirce.CirceSupport._
 import io.circe.Json
+import utils.circe.zonedDateTimeEncoder
+import utils.akka.http.scaladsl.unmarshalling._
 
-import scala.concurrent.Future
 import scala.io.StdIn
 import scala.language.postfixOps
 
@@ -24,10 +24,7 @@ object Main extends App {
   import system.dispatcher
 
   val sessionStore = new SessionStore
-  val permigoService = new PermigoService(sessionStore)
-
-  implicit val uuidFromStringUnmarshaller: Unmarshaller[String, UUID] = Unmarshaller(ec => s => Future(UUID.fromString(s))(ec))
-  implicit val dateFromStringUnmarshaller: Unmarshaller[String, LocalDate] = Unmarshaller(ec => s => Future(LocalDate.parse(s)))
+  val permigoService = new PermigoService
 
   val extractSessionFromAccessToken: Directive1[SessionData] = parameter("access_token".as[UUID]) flatMap { access_token =>
     sessionStore.get(access_token) match {
@@ -65,6 +62,16 @@ object Main extends App {
           parameter("city_id".as[Int]) { city_id =>
             onSuccess(permigoService.getInstructors(session.session, city_id)) { instructors =>
               complete(instructors)
+            }
+          }
+        }
+      } ~ path("available_slots") {
+        get {
+          parameters("instructor_id".as[Int], "start".as[LocalDate], "end".as[LocalDate], "ignore_max_workhours".as[Boolean] ? false) { (instructor_id, start, end, ignoreMaxWorkHours) =>
+            val fSlots = permigoService.getAvailableSlots(session.session, instructor_id, start, end, ignoreMaxWorkHours)
+
+            onSuccess(fSlots) { slots =>
+              complete(slots)
             }
           }
         }
