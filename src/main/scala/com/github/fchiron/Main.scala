@@ -5,15 +5,16 @@ import java.util.UUID
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
+import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.{ AuthorizationFailedRejection, Directive1 }
 import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
 import com.github.fchiron.SessionStore.SessionData
 import de.heikoseeberger.akkahttpcirce.CirceSupport._
 import io.circe.Json
-import utils.circe.zonedDateTimeEncoder
 import utils.akka.http.scaladsl.unmarshalling._
 
+import scala.concurrent.duration._
 import scala.io.StdIn
 import scala.language.postfixOps
 
@@ -25,6 +26,7 @@ object Main extends App {
 
   val sessionStore = new SessionStore
   val permigoService = new PermigoService
+  val subscriptionService = new SubscriptionService(permigoService)
 
   val extractSessionFromAccessToken: Directive1[SessionData] = parameter("access_token".as[UUID]) flatMap { access_token =>
     sessionStore.get(access_token) match {
@@ -65,18 +67,38 @@ object Main extends App {
             }
           }
         }
-      } ~ path("available_slots") {
-        get {
-          parameters("instructor_id".as[Int], "start".as[LocalDate], "end".as[LocalDate], "ignore_max_workhours".as[Boolean] ? false) { (instructor_id, start, end, ignoreMaxWorkHours) =>
-            val fSlots = permigoService.getAvailableSlots(session.session, instructor_id, start, end, ignoreMaxWorkHours)
+      } ~ pathPrefix("available_slots") {
+        pathEndOrSingleSlash {
+          get {
+            parameters("instructor_id".as[Int], "start".as[LocalDate], "end".as[LocalDate], "ignore_max_workhours".as[Boolean] ? false) { (instructor_id, start, end, ignoreMaxWorkHours) =>
+              val fSlots = permigoService.getAvailableSlots(session.session, instructor_id, start, end, ignoreMaxWorkHours)
 
-            onSuccess(fSlots) { slots =>
-              complete(slots)
+              onSuccess(fSlots) { slots =>
+                complete(slots)
+              }
+            }
+          }
+        } ~ path("subscriptions") {
+          get {
+            subscriptionService.getSubscription(session) match {
+              case None => complete(StatusCodes.NotFound)
+              case Some(slots) => complete(slots)
+            }
+          } ~ post {
+            entity(as[AvailableSlotsSubscription]) { subscription =>
+              subscriptionService.addSubscription(session, subscription)
+              complete(StatusCodes.OK)
             }
           }
         }
       }
     }
+
+  // Setup subscription worker
+  //system.scheduler.schedule(initialDelay = 10.seconds, interval = 1.minute) {
+  system.scheduler.schedule(initialDelay = 10.seconds, interval = 10.seconds) {
+    subscriptionService.checkAvailableSlotsMatchingSubscriptions()
+  }
 
   val bindingFuture = Http().bindAndHandle(route, "localhost", 8080)
 
