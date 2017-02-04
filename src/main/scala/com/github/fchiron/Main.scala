@@ -10,6 +10,8 @@ import akka.http.scaladsl.server.{ AuthorizationFailedRejection, Directive1 }
 import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
 import com.github.fchiron.SessionStore.SessionData
+import com.github.fchiron.config.RedisConfig
+import com.typesafe.scalalogging.LazyLogging
 import de.heikoseeberger.akkahttpcirce.CirceSupport._
 import io.circe.Json
 import utils.akka.http.scaladsl.unmarshalling._
@@ -17,16 +19,34 @@ import utils.akka.http.scaladsl.unmarshalling._
 import scala.concurrent.duration._
 import scala.io.StdIn
 import scala.language.postfixOps
+import scala.util.{ Failure, Success }
 
-object Main extends App {
+object Main extends App with LazyLogging {
   implicit val system = ActorSystem()
   implicit val materializer = ActorMaterializer()
 
   import system.dispatcher
 
+  import org.sedis._
+  import redis.clients.jedis._
+
+  val redisPool = {
+    pureconfig.loadConfig[RedisConfig]("redis") match {
+      case Success(RedisConfig(redisHost, redisPort, redisPassword, redisTimeout)) =>
+        redisPassword match {
+          case Some(password) => new Pool(new JedisPool(new JedisPoolConfig, redisHost, redisPort, redisTimeout, password))
+          case None => new Pool(new JedisPool(new JedisPoolConfig, redisHost, redisPort, redisTimeout))
+        }
+      case Failure(ex) =>
+        logger.error("Could not parse redis config", ex)
+        system.terminate()
+        throw ex
+    }
+  }
+
   val sessionStore = new SessionStore
   val permigoService = new PermigoService
-  val subscriptionService = new SubscriptionService(permigoService)
+  val subscriptionService = new SubscriptionService(permigoService, redisPool)
 
   val extractSessionFromAccessToken: Directive1[SessionData] = parameter("access_token".as[UUID]) flatMap { access_token =>
     sessionStore.get(access_token) match {

@@ -10,10 +10,18 @@ libraryDependencies ++= {
   }
 
   Seq(
+    // Main
     "com.typesafe.akka" %% "akka-http" % "10.0.3",
+    "net.ruippeixotog" %% "scala-scraper" % "1.2.0",
+    "org.sedis" %% "sedis" % "1.2.2",
+
+    // JSON
     "de.heikoseeberger" %% "akka-http-circe" % "1.12.0",
     "io.circe" %% "circe-generic" % Versions.circe,
     "io.circe" %% "circe-parser" % Versions.circe,
-    "net.ruippeixotog" %% "scala-scraper" % "1.2.0"
+
+    // Utils
+    "com.github.melrief" %% "pureconfig" % "0.5.1",
+    "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0"
   )
 }
